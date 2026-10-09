@@ -1,9 +1,29 @@
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+PROJECT_DIR = Path(__file__).parent.resolve()
+LOCAL_EDGE = PROJECT_DIR / ".venv" / "edge" / "opt" / "microsoft" / "msedge" / "msedge"
+WSL_MUSIC_BASE = "/mnt/c/Users/khzso/Music"
+
+
+def launch_browser(p, user_data_dir):
+    """Native Windows Edge (channel=msedge) on Windows; WSL-local isolated Edge on Linux."""
+    if os.name != "nt":
+        return p.chromium.launch_persistent_context(
+            user_data_dir=user_data_dir,
+            executable_path=str(LOCAL_EDGE),
+            headless=True,
+            locale="en-US",
+        )
+    return p.chromium.launch_persistent_context(
+        user_data_dir=user_data_dir, headless=True, channel="msedge", locale="en-US"
+    )
 
 
 def execute_cmd_get_last_line(command):
@@ -30,11 +50,7 @@ def get_album_href_list(url: str):
         user_data_dir = tempfile.mkdtemp()
 
         try:
-            browser = p.chromium.launch_persistent_context(
-                user_data_dir=user_data_dir,
-                headless=True,
-                channel="msedge"
-            )
+            browser = launch_browser(p, user_data_dir)
 
             page = browser.new_page()
             page.goto(url)
@@ -75,6 +91,12 @@ def get_album_href_list(url: str):
     return hrefs
 
 
+def music_dir(artist_name):
+    if os.name == "nt":
+        return rf"%USERPROFILE%\Music\{artist_name}"
+    return f"{WSL_MUSIC_BASE}/{artist_name}"
+
+
 def main():
     url = ""
     if len(sys.argv) != 2:
@@ -89,8 +111,9 @@ def main():
     # TODO : this is very inefficient like this
     # artist_name = execute_cmd_get_last_line(f'yt-dlp --print "%(artist)s" "https://music.youtube.com/{hrefs[0]}"')
     artist_name = "Ours Samplus"
-    music_output_folder = "%USERPROFILE%\\Music\\{artist_name}"
-    execute_cmd_get_last_line(f'mkdir {music_output_folder}')
+    music_output_folder = music_dir(artist_name)
+    mkdir = "mkdir" if os.name == "nt" else "mkdir -p"
+    execute_cmd_get_last_line(f'{mkdir} "{music_output_folder}"')
 
     print("step 3")
     for href in reversed(hrefs):
