@@ -28,6 +28,27 @@ def execute_cmd_get_last_line(command):
     return last_line
 
 
+def get_album_shelf(page):
+    # Gate: some channels hydrate slowly - wait for any shelf to render first.
+    page.wait_for_selector("ytmusic-carousel-shelf-renderer", timeout=45000)
+
+    albums = page.locator(
+        "ytmusic-carousel-shelf-renderer",
+        has=page.locator("ytmusic-carousel-shelf-basic-header-renderer", has_text="Albums"),
+    )
+    try:
+        albums.first.wait_for(timeout=10000)
+        return albums.first
+    except Exception:
+        pass
+    # fallback: any carousel shelf that has browse links
+    any_shelf = page.locator(
+        "ytmusic-carousel-shelf-renderer", has=page.locator("a[href^='browse/']")
+    )
+    any_shelf.first.wait_for(timeout=10000)
+    return any_shelf.first
+
+
 def get_album_href_list(url: str):
     hrefs = []
     with sync_playwright() as p:
@@ -52,11 +73,8 @@ def get_album_href_list(url: str):
             except Exception:
                 pass
 
-            # 1. Select the 2nd carousel shelf
-            shelf = page.locator(
-                "#contents > ytmusic-carousel-shelf-renderer:nth-child(2)"
-            )
-            shelf.wait_for()
+            # 1. Select the Albums carousel shelf (heading-anchored, see get_album_shelf)
+            shelf = get_album_shelf(page)
 
             # 2. Drill down until <ul id="items">
             ul_items = shelf.locator("ul#items")
