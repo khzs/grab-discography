@@ -1,3 +1,4 @@
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,45 @@ def execute_cmd_get_last_line(command):
     return last_line
 
 
+def get_artist_name(page):
+    # Wait for the page to settle: og:title is server-rendered for @handle urls, but on channel/UC... urls
+    # it hydrates as 'undefined' first and only gets filled in when the SPA has resolved the channel.
+    try:
+        page.wait_for_function(
+            """() => {
+                const og = document.querySelector('meta[property="og:title"]')?.content;
+                const t = document.title;
+                return (og && og !== 'undefined' && og.trim())
+                    || (t && t !== 'YouTube Music' && t.trim());
+            }""",
+            timeout=30000,
+        )
+    except Exception:
+        pass  # fall through and check what we did get
+
+    candidates = []
+
+    try:
+        candidates.append(
+            page.locator('meta[property="og:title"]').first.get_attribute("content", timeout=5000)
+        )
+    except Exception:
+        pass
+
+    try:
+        candidates.append(page.title())
+    except Exception:
+        pass
+
+    for name in candidates:
+        name = (name or "").strip()
+        # document.title may come with a " - YouTube Music" suffix
+        name = re.sub(r"\s*-\s*YouTube( Music)?\s*$", "", name)
+        if name and name.lower() not in ("undefined", "youtube music"):
+            return name
+    sys.exit("ERROR: could not determine artist name - is the channel URL valid?")
+
+
 def get_album_shelf(page):
     # Gate: some channels hydrate slowly - wait for any shelf to render first.
     page.wait_for_selector("ytmusic-carousel-shelf-renderer", timeout=45000)
@@ -49,7 +89,8 @@ def get_album_shelf(page):
     return any_shelf.first
 
 
-def get_album_href_list(url: str):
+def scrape_channel(url: str):
+    """Scrape a YT Music artist channel. Returns (artist_name, [album browse hrefs])."""
     hrefs = []
     with sync_playwright() as p:
         # Create an isolated temp profile
@@ -72,6 +113,8 @@ def get_album_href_list(url: str):
                 page.wait_for_load_state("networkidle")
             except Exception:
                 pass
+
+            artist_name = get_artist_name(page)
 
             # 1. Select the Albums carousel shelf (heading-anchored, see get_album_shelf)
             shelf = get_album_shelf(page)
@@ -96,23 +139,16 @@ def get_album_href_list(url: str):
             browser.close()
         finally:
             shutil.rmtree(user_data_dir)
-    return hrefs
+    return artist_name, hrefs
 
 
 def main():
-    url = ""
-    if len(sys.argv) != 2:
-        url = "https://music.youtube.com/channel/UCaREzwA3QTe95YCYx9jGqfQ"
-    else:
-        url = sys.argv[1]
+    url = sys.argv[1]
 
     print("step 1")
-    hrefs = get_album_href_list(url)
+    artist_name, hrefs = scrape_channel(url)
 
     print("step 2")
-    # TODO : this is very inefficient like this
-    # artist_name = execute_cmd_get_last_line(f'yt-dlp --print "%(artist)s" "https://music.youtube.com/{hrefs[0]}"')
-    artist_name = "Ours Samplus"
     music_output_folder = f"{WSL_MUSIC_BASE}/{artist_name}"
     execute_cmd_get_last_line(f'mkdir -p "{music_output_folder}"')
 

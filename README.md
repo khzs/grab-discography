@@ -33,11 +33,12 @@ uv run python main.py [channel_url]
 
 | Parameter | Required | Description |
 |---|---|---|
-| `channel_url` | no | YouTube Music artist channel URL; defaults to Ours Samplus |
+| `channel_url` | yes | YouTube Music artist channel URL; both `@Handle` and old-style `channel/UC...` forms work |
 
 ## Notes
 
-- The artist name for the output folder is **hardcoded** in `main()` — change `artist_name` there when downloading a different artist.
+- The artist name is read from the channel page itself (`og:title`) — no hardcoded name, no extra `yt-dlp` call.
+- Invalid/stale channel URLs abort with an error instead of downloading into a wrong folder.
 - Albums are downloaded oldest first.
 - If a cookie consent dialog pops up, it's dismissed automatically ("Reject all").
 - Aborting mid-run (Ctrl-C) leaves the current `yt-dlp` download running — kill it separately.
