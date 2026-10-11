@@ -28,6 +28,7 @@ mode is auto-detected from the URL:
   single album:         {MUSIC_BASE_URL}/browse/MPREb_...
                         {MUSIC_BASE_URL}/playlist?list=OLAK5uy_...
                         {MUSIC_BASE_URL}/watch?v=...&list=OLAK5uy_...  (rewritten to playlist)
+                        <artist>.bandcamp.com/album/<slug>
 """
 
 
@@ -39,12 +40,21 @@ def sanitize_for_windows(name: str) -> str:
 
 def classify_url(arg: str):
     if not re.match(r"^https?://", arg, re.IGNORECASE):
-        # bare href, e.g. "browse/MPREb_..." as printed by discography mode
-        arg = f"{MUSIC_BASE_URL}/{arg.lstrip('/')}"
+        # bare hrefs as printed by discography mode, or a bandcamp album path without the scheme
+        if ".bandcamp.com/album/" in arg:
+            arg = f"https://{arg.lstrip('/')}"
+        else:
+            arg = f"{MUSIC_BASE_URL}/{arg.lstrip('/')}"
 
     parsed = urlparse(arg)
+
+    # --- bandcamp single album ---------------------------------------------
+    m = re.fullmatch(r"/album/([\w-]+)", parsed.path.rstrip("/"))
+    if m and parsed.netloc.lower().endswith(".bandcamp.com"):
+        return "album", f"https://{parsed.netloc.lower()}/album/{m.group(1)}"
+
     if parsed.netloc.lower() not in ("music.youtube.com", "youtube.com", "www.youtube.com", "m.youtube.com"):
-        sys.exit(f"ERROR: not a YouTube Music URL: {arg}\n\n{USAGE}")
+        sys.exit(f"ERROR: not a YouTube Music or Bandcamp album URL: {arg}\n\n{USAGE}")
 
     path = parsed.path.rstrip("/")
     list_id = (parse_qs(parsed.query).get("list") or [""])[0]
@@ -85,7 +95,7 @@ def probe_album_metadata(url: str):
         if artist and album and year:
             return artist, album, int(year)
 
-    sys.exit("ERROR: the tracks carry no artist/album/release-year metadata - is this URL really a YouTube Music album?")
+    sys.exit("ERROR: the tracks carry no artist/album/release-year metadata - is this URL really an album?")
 
 
 def execute_cmd_get_last_line(command):

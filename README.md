@@ -1,6 +1,6 @@
 # grab-discography
 
-Download an artist's full discography from YouTube Music as MP3s — with cover art and metadata baked in.
+Download an artist's full discography from YouTube Music — or a single album from YouTube Music / Bandcamp — as MP3s with cover art and metadata baked in.
 
 Runs in WSL (Debian). Browser and Python env stay local to the project; downloads land in your Windows Music folder.
 
@@ -15,8 +15,9 @@ Two modes, **auto-detected from the shape of the URL** — no flags needed.
 - Downloads every album with `yt-dlp` as MP3 (best quality, thumbnail + metadata embedded)
 - Saves everything to `/mnt/c/Users/<you>/Music/<artist>/<year> - <album>/NN - <title>.mp3`
 
-**Single album** — grabs just one album (no browser involved):
+**Single album** — grabs just one album (no browser involved), from YouTube Music or Bandcamp:
 
+- Accepts YouTube Music album links (`browse/MPREb_...`, shared album playlists, album watch links) and Bandcamp album pages (`<artist>.bandcamp.com/album/<slug>`)
 - Reads artist / album / year from the tracks' metadata via `yt-dlp`
 - Saves everything to `/mnt/c/Users/<you>/Music/<artist> - <year> - <album>/NN - <title>.mp3`
 
@@ -48,8 +49,9 @@ The mode is picked from the URL:
 | `music.youtube.com/browse/MPREb_...` | single album | `Music/<Artist> - <Year> - <Album>/NN - <Title>.mp3` |
 | `music.youtube.com/playlist?list=OLAK5uy_...` (shared album link) | single album | same |
 | `music.youtube.com/watch?v=...&list=OLAK5uy_...` (track inside album view) | single album | same |
+| `<artist>.bandcamp.com/album/<slug>` | single album | same |
 
-Anything else — plain `youtube.com`/`m.youtube.com` hosts get rewritten to `music.youtube.com`, and the raw `browse/MPREb_...` hrefs that discography mode prints can be passed as-is (grab one album from a channel without re-scraping). Regular playlists (`list=PL...`), single tracks and non-YouTube URLs abort with a usage message.
+Anything else — plain `youtube.com`/`m.youtube.com` hosts get rewritten to `music.youtube.com`, and the raw `browse/MPREb_...` hrefs that discography mode prints can be passed as-is (grab one album from a channel without re-scraping). Regular YouTube playlists (`list=PL...`), single tracks, Bandcamp track pages and any other URL abort with a usage message.
 
 ## Notes
 
