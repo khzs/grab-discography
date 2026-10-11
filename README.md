@@ -6,10 +6,19 @@ Runs in WSL (Debian). Browser and Python env stay local to the project; download
 
 ## What it does
 
+Two modes, **auto-detected from the shape of the URL** — no flags needed.
+
+**Discography** — scrapes the artist's channel and grabs every album:
+
 - Opens the artist's YouTube Music channel in a headless Edge browser (Playwright)
 - Collects all album links from the channel page
 - Downloads every album with `yt-dlp` as MP3 (best quality, thumbnail + metadata embedded)
 - Saves everything to `/mnt/c/Users/<you>/Music/<artist>/<year> - <album>/NN - <title>.mp3`
+
+**Single album** — grabs just one album (no browser involved):
+
+- Reads artist / album / year from the tracks' metadata via `yt-dlp`
+- Saves everything to `/mnt/c/Users/<you>/Music/<artist> - <year> - <album>/NN - <title>.mp3`
 
 ## Requirements
 
@@ -28,17 +37,26 @@ dpkg-deb -x microsoft-edge-stable_155.0.4283.45-1_amd64.deb . && rm *.deb
 
 ```bash
 uv sync
-uv run python main.py [channel_url]
+uv run python main.py [url]
 ```
 
-| Parameter | Required | Description |
+The mode is picked from the URL:
+
+| URL shape | Mode | Output |
 |---|---|---|
-| `channel_url` | yes | YouTube Music artist channel URL; both `@Handle` and old-style `channel/UC...` forms work |
+| `music.youtube.com/@artist` or `.../channel/UC...` | discography | `Music/<Artist>/<Year> - <Album>/NN - <Title>.mp3` |
+| `music.youtube.com/browse/MPREb_...` | single album | `Music/<Artist> - <Year> - <Album>/NN - <Title>.mp3` |
+| `music.youtube.com/playlist?list=OLAK5uy_...` (shared album link) | single album | same |
+| `music.youtube.com/watch?v=...&list=OLAK5uy_...` (track inside album view) | single album | same |
+
+Anything else — plain `youtube.com`/`m.youtube.com` hosts get rewritten to `music.youtube.com`, and the raw `browse/MPREb_...` hrefs that discography mode prints can be passed as-is (grab one album from a channel without re-scraping). Regular playlists (`list=PL...`), single tracks and non-YouTube URLs abort with a usage message.
 
 ## Notes
 
-- The artist name is read from the channel page itself (`og:title`) — no hardcoded name, no extra `yt-dlp` call.
-- Invalid/stale channel URLs abort with an error instead of downloading into a wrong folder.
+- The artist name is read from the channel page itself (`og:title`) — no hardcoded name, no extra `yt-dlp` call. In single-album mode it comes from the tracks' embedded metadata instead.
+- Invalid/stale URLs abort with an error instead of downloading into a wrong folder.
+- Folder names are sanitized for Windows (an `AC/DC` won't nest two folders).
+- Track numbers are the zero-padded positions in the album (`NN - Title.mp3`).
 - Albums are downloaded oldest first.
 - If a cookie consent dialog pops up, it's dismissed automatically ("Reject all").
 - Aborting mid-run (Ctrl-C) leaves the current `yt-dlp` download running — kill it separately.

@@ -1,15 +1,90 @@
+import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright
 
 PROJECT_DIR = Path(__file__).parent.resolve()
 LOCAL_EDGE = PROJECT_DIR / ".venv" / "edge" / "opt" / "microsoft" / "msedge" / "msedge"
 WSL_MUSIC_BASE = "/mnt/c/Users/khzso/Music"
+MUSIC_BASE_URL = "https://music.youtube.com"
+
+YTDLP_AUDIO_FLAGS = (
+    "-f bestaudio   -x --audio-format mp3 --audio-quality 0   --embed-thumbnail   "
+    '--embed-metadata   --parse-metadata "playlist_index:%(track_number)s"   '
+    "--add-metadata  --windows-filenames"
+)
+
+USAGE = f"""usage: python main.py <url>
+
+mode is auto-detected from the URL:
+  channel discography:  {MUSIC_BASE_URL}/@handle  or  {MUSIC_BASE_URL}/channel/UC...
+  single album:         {MUSIC_BASE_URL}/browse/MPREb_...
+                        {MUSIC_BASE_URL}/playlist?list=OLAK5uy_...
+                        {MUSIC_BASE_URL}/watch?v=...&list=OLAK5uy_...  (rewritten to playlist)
+"""
+
+
+def sanitize_for_windows(name: str) -> str:
+    name = re.sub(r"[<>:\"/\\|?*]", "_", str(name))
+    name = name.strip().rstrip(" .")  # Windows dislikes trailing dots/spaces too
+    return name or "Unknown"
+
+
+def classify_url(arg: str):
+    if not re.match(r"^https?://", arg, re.IGNORECASE):
+        # bare href, e.g. "browse/MPREb_..." as printed by discography mode
+        arg = f"{MUSIC_BASE_URL}/{arg.lstrip('/')}"
+
+    parsed = urlparse(arg)
+    if parsed.netloc.lower() not in ("music.youtube.com", "youtube.com", "www.youtube.com", "m.youtube.com"):
+        sys.exit(f"ERROR: not a YouTube Music URL: {arg}\n\n{USAGE}")
+
+    path = parsed.path.rstrip("/")
+    list_id = (parse_qs(parsed.query).get("list") or [""])[0]
+
+    # --- single album ------------------------------------------------------
+    # an album page, or a track watched inside its album (list= is then the album)
+    m = re.fullmatch(r"/browse/(MP[\w-]+)", path)
+    if m:
+        return "album", f"{MUSIC_BASE_URL}/browse/{m.group(1)}"
+    if path == "/playlist" and list_id.startswith("OLAK5uy"):
+        return "album", f"{MUSIC_BASE_URL}/playlist?list={list_id}"
+    if path == "/watch" and list_id.startswith("OLAK5uy"):
+        return "album", f"{MUSIC_BASE_URL}/playlist?list={list_id}"
+
+    # --- channel discography ----------------------------------------------
+    if re.match(r"^/(@[\w.\-]+|channel/[\w\-]+)", path):
+        return "channel", f"{MUSIC_BASE_URL}{path}"
+
+    sys.exit(f"ERROR: unrecognized URL : {arg}\n\n{USAGE}")
+
+
+def probe_album_metadata(url: str):
+    """Return (artist, album, year) from an album's track metadata."""
+    result = subprocess.run(
+        f'yt-dlp --skip-download --playlist-items 1:5 --dump-single-json "{url}"',
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        sys.exit(f"ERROR: could not read album metadata via yt-dlp:\n{result.stderr.strip()}")
+
+    data = json.loads(result.stdout)
+    for entry in data.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        artist, album, year = entry.get("artist"), entry.get("album"), entry.get("release_year")
+        if artist and album and year:
+            return artist, album, int(year)
+
+    sys.exit("ERROR: the tracks carry no artist/album/release-year metadata - is this URL really a YouTube Music album?")
 
 
 def execute_cmd_get_last_line(command):
@@ -142,20 +217,54 @@ def scrape_channel(url: str):
     return artist_name, hrefs
 
 
-def main():
-    url = sys.argv[1]
+def download_album(url: str, output_dir: str):
+    """Shared yt-dlp call; output_dir may contain template fields, filled in per track."""
+    execute_cmd_get_last_line(
+        f'yt-dlp "{url}" {YTDLP_AUDIO_FLAGS} '
+        f'--output "{output_dir}/%(playlist_index)02d - %(title)s.%(ext)s" '
+    )
 
-    print("step 1")
-    artist_name, hrefs = scrape_channel(url)
+
+def grab_single_album(url: str):
+    """Download one album to <Music>/<Artist> - <Year> - <Album>/<NN> - <Title>.mp3."""
+    print("step 1  reading album metadata")
+    artist, album, year = probe_album_metadata(url)
+    print(f"        {artist} - {year} - {album}")
 
     print("step 2")
-    music_output_folder = f"{WSL_MUSIC_BASE}/{artist_name}"
+    album_dir = f"{WSL_MUSIC_BASE}/{sanitize_for_windows(artist)} - {year} - {sanitize_for_windows(album)}"
+    execute_cmd_get_last_line(f'mkdir -p "{album_dir}"')
+
+    print("step 3")
+    download_album(url, album_dir)
+
+
+def grab_discography(channel_url: str):
+    """Download a channel's full discography to <Music>/<Artist>/<Year> - <Album>/<NN> - <Title>.mp3."""
+    print("step 1")
+    artist_name, hrefs = scrape_channel(channel_url)
+
+    print("step 2")
+    music_output_folder = f"{WSL_MUSIC_BASE}/{sanitize_for_windows(artist_name)}"
     execute_cmd_get_last_line(f'mkdir -p "{music_output_folder}"')
 
     print("step 3")
     for href in reversed(hrefs):
         print(href)
-        execute_cmd_get_last_line(f'yt-dlp "https://music.youtube.com/{href}"   -f bestaudio   -x --audio-format mp3 --audio-quality 0   --embed-thumbnail   --embed-metadata   --parse-metadata "playlist_index:%(track_number)s"   --add-metadata  --windows-filenames  --output "{music_output_folder}/%(release_year)s - %(album)s/%(playlist_index)02d - %(title)s.%(ext)s" ')
+        download_album(f"{MUSIC_BASE_URL}/{href}", f"{music_output_folder}/%(release_year)s - %(album)s")
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(USAGE)
+
+    mode, url = classify_url(sys.argv[1])
+    print(f"mode: {mode}\nurl:  {url}\n")
+
+    if mode == "album":
+        grab_single_album(url)
+    else:
+        grab_discography(url)
 
 
 if __name__ == "__main__":
