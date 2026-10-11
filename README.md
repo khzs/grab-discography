@@ -59,4 +59,5 @@ Anything else — plain `youtube.com`/`m.youtube.com` hosts get rewritten to `mu
 - Track numbers are the zero-padded positions in the album (`NN - Title.mp3`).
 - Albums are downloaded oldest first.
 - If a cookie consent dialog pops up, it's dismissed automatically ("Reject all").
+- YouTube sometimes rate-limits a download mid-album (`HTTP 403` on individual tracks). Each album is retried up to 3 times with a minute's pause — a re-run skips already-downloaded tracks, so only the missing ones are picked up. Albums that still fail are listed at the end (discography mode) / flagged with a non-zero exit (single-album mode); re-run the same URL later to resume.
 - Aborting mid-run (Ctrl-C) leaves the current `yt-dlp` download running — kill it separately.

@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -101,7 +102,7 @@ def execute_cmd_get_last_line(command):
         if line.strip():
             last_line = line.strip()
     process.wait()
-    return last_line
+    return process.returncode, last_line
 
 
 def get_artist_name(page):
@@ -217,12 +218,20 @@ def scrape_channel(url: str):
     return artist_name, hrefs
 
 
-def download_album(url: str, output_dir: str):
-    """Shared yt-dlp call; output_dir may contain template fields, filled in per track."""
-    execute_cmd_get_last_line(
+def download_album(url: str, output_dir: str) -> bool:
+    command = (
         f'yt-dlp "{url}" {YTDLP_AUDIO_FLAGS} '
         f'--output "{output_dir}/%(playlist_index)02d - %(title)s.%(ext)s" '
     )
+    for attempt in range(1, 4):
+        rc, _ = execute_cmd_get_last_line(command)
+        if rc == 0:
+            return True
+        if attempt < 3:
+            print(f"\nERROR: yt-dlp exit {rc} - YouTube may be rate limiting; retrying in 60s\n")
+            time.sleep(60)
+    print(f"\nWARNING: {url} still failing after 3 attempts - re-run later to resume\n")
+    return False
 
 
 def grab_single_album(url: str):
@@ -236,7 +245,8 @@ def grab_single_album(url: str):
     execute_cmd_get_last_line(f'mkdir -p "{album_dir}"')
 
     print("step 3")
-    download_album(url, album_dir)
+    if not download_album(url, album_dir):
+        sys.exit(1)
 
 
 def grab_discography(channel_url: str):
@@ -249,9 +259,16 @@ def grab_discography(channel_url: str):
     execute_cmd_get_last_line(f'mkdir -p "{music_output_folder}"')
 
     print("step 3")
+    failed = []
     for href in reversed(hrefs):
         print(href)
-        download_album(f"{MUSIC_BASE_URL}/{href}", f"{music_output_folder}/%(release_year)s - %(album)s")
+        if not download_album(f"{MUSIC_BASE_URL}/{href}", f"{music_output_folder}/%(release_year)s - %(album)s"):
+            failed.append(href)
+
+    if failed:
+        print(f"\n{len(failed)} album(s) incomplete - re-run later to resume:")
+        for href in failed:
+            print(f"  {MUSIC_BASE_URL}/{href}")
 
 
 def main():
